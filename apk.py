@@ -8,10 +8,10 @@ st.set_page_config(page_title="Absen & Pendapatan Harian", layout="wide")
 st.title("💼 Sistem Absen Pulang & Input Pendapatan Harian")
 st.write("Karyawan wajib mengisi nama dan total pendapatan harian sebelum pulang.")
 
-# Masukkan LINK GOOGLE SHEETS ANDA di bawah ini!
-URL_SHEET = "PASTE_LINK_GOOGLE_SHEETS_ANDA_DI_SINI"
+# --- LINK GOOGLE SHEETS MILIKMU SUDAH TERHUBUNG DI SINI ---
+URL_SHEET = "https://google.com"
 
-# Hubungkan ke Google Sheets
+# Hubungkan ke Google Sheets pusat
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
     db_karyawan = conn.read(spreadsheet=URL_SHEET, ttl="0")
@@ -20,7 +20,7 @@ except Exception:
         "Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"
     ])
 
-# Ambil waktu otomatis
+# Ambil waktu otomatis hari ini
 waktu_skrg = datetime.now()
 waktu_teks = waktu_skrg.strftime("%d-%m-%Y %H:%M:%S")
 tanggal_hari_ini = waktu_skrg.strftime("%d-%m-%Y")
@@ -32,7 +32,7 @@ bulan_indo_nama = {
     "September": "September", "October": "Oktober", "November": "November", "December": "Desember"
 }
 
-# Form Input
+# Form Input Karyawan
 st.subheader("📝 Form Absen Pulang")
 col1, col2 = st.columns(2)
 with col1:
@@ -54,12 +54,10 @@ def format_rupiah(angka):
 
 st.caption(f"Format Terbaca: **{format_rupiah(pendapatan_hari_ini)}**")
 
-# Tombol Simpan (Langsung Push ke Google Sheets)
+# Tombol Simpan (Data otomatis sinkron masuk ke Google Sheets)
 if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_width=True):
     if nama_karyawan.strip() == "":
         st.error("❌ Nama karyawan tidak boleh kosong!")
-    elif URL_SHEET == "PASTE_LINK_GOOGLE_SHEETS_ANDA_DI_SINI":
-        st.error("❌ Anda belum memasukkan link Google Sheets di baris kode nomor 12!")
     else:
         bulan_inggris = waktu_skrg.strftime("%B")
         nama_bulan_indo = bulan_indo_nama.get(bulan_inggris, "Juni")
@@ -73,15 +71,15 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
             "Pendapatan (Rupiah)": float(pendapatan_hari_ini)
         }])
         
-        # Gabungkan data lama dan baru, lalu update spreadsheet
+        # Menggabungkan data lama dari Google Sheets dengan input baru, lalu mengunggahnya
         df_update = pd.concat([db_karyawan, data_baru], ignore_index=True)
         conn.update(spreadsheet=URL_SHEET, data=df_update)
-        st.success(f"✅ Data absen {nama_karyawan} berhasil tersimpan secara permanen!")
+        st.success(f"✅ Data absen {nama_karyawan} berhasil tersimpan ke database pusat!")
         st.rerun()
 
 st.markdown("---")
 
-# Tampilkan Riwayat Master
+# Tampilkan Seluruh Riwayat Absen Master dari Google Sheets
 st.subheader("📋 Seluruh Riwayat Absen & Pendapatan Master")
 if not db_karyawan.empty and db_karyawan.dropna(how='all').shape[0] > 0:
     df_visual_master = db_karyawan.copy()
@@ -101,14 +99,14 @@ if not db_karyawan.empty and db_karyawan.dropna(how='all').shape[0] > 0:
         if st.button("❌ Hapus Data", type="secondary", use_container_width=True):
             df_update = db_karyawan.drop(pilihan_hapus).reset_index(drop=True)
             conn.update(spreadsheet=URL_SHEET, data=df_update)
-            st.success("🗑️ Data absen berhasil dihapus dari pusat data!")
+            st.success("🗑️ Data absen berhasil dihapus dari database pusat!")
             st.rerun()
 else:
     st.info("Belum ada karyawan yang absen hari ini.")
 
 st.markdown("---")
 
-# Analisis Waktu
+# 4. Filter Grafik & Analisis Data Berdasarkan Waktu
 st.subheader("📊 Filter Grafik & Analisis Data Berdasarkan Waktu")
 list_tahun = ["2024", "2025", "2026", "2027", "2028"]
 if tahun_ini not in list_tahun: list_tahun.append(tahun_ini)
