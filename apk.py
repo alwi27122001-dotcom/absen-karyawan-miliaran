@@ -9,8 +9,8 @@ st.set_page_config(page_title="Absen & Pendapatan Harian", layout="wide")
 st.title("💼 Sistem Absen Pulang & Input Pendapatan Harian")
 st.write("Karyawan wajib mengisi nama dan total pendapatan harian sebelum pulang.")
 
-# URL API Apps Script Anda
-URL_API = "https://google.com"
+# URL Aplikasi Web Utama Anda (Menggunakan Link Anda)
+URL_API = "https://script.google.com/macros/s/AKfycbwx9SPFb70QzpVf6SpS5vHw8gvuhRC1yGLLB0U31JuKIm1o-UMzfIcbFIlsQFm0Es-uHg/exec"
 
 # Ambil data secara real-time dari Google Sheets via API Apps Script
 db_karyawan = pd.DataFrame(columns=["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"])
@@ -19,9 +19,18 @@ try:
     response = requests.get(URL_API, timeout=10)
     if response.status_code == 200:
         raw_data = response.json()
-        if isinstance(raw_data, list) and len(raw_data) > 1:
+        
+        # Saring jika data berupa baris matriks array dari Google Sheets
+        if isinstance(raw_data, list) and len(raw_data) > 0:
             headers = ["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"]
-            db_karyawan = pd.DataFrame(raw_data[1:], columns=headers[:len(raw_data[0])])
+            
+            # Jika spreadsheet baru berisi baris judul saja
+            if len(raw_data) == 1:
+                db_karyawan = pd.DataFrame(columns=headers)
+            else:
+                # Ambil baris data ke-2 dan seterusnya, pasangkan dengan header
+                records = raw_data[1:]
+                db_karyawan = pd.DataFrame(records, columns=headers[:len(records[0])])
 except Exception:
     pass
 
@@ -69,20 +78,26 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
         nama_bulan_indo = bulan_indo_nama.get(bulan_inggris, "Juni")
         
         payload = {
-            "waktu": waktu_teks, "tahun": tahun_ini, "bulan": nama_bulan_indo,
-            "tanggal": tanggal_hari_ini, "nama": nama_karyawan, "pendapatan": float(pendapatan_hari_ini)
+            "waktu": waktu_teks,
+            "tahun": tahun_ini,
+            "bulan": nama_bulan_indo,
+            "tanggal": tanggal_hari_ini,
+            "nama": nama_karyawan,
+            "pendapatan": float(pendapatan_hari_ini)
         }
+        
         try:
+            # Mengirim data langsung ke database pusat via API
             requests.post(URL_API, data=json.dumps(payload), headers={"Content-Type": "application/json"})
-            st.success(f"✅ Data absen {nama_karyawan} berhasil masuk ke Google Sheets pusat!")
+            st.success(f"✅ Data absen {nama_karyawan} berhasil tersimpan ke pusat data!")
             st.balloons()
             st.rerun()
         except:
-            st.error("Gagal terhubung dengan server database.")
+            st.error("Gagal terhubung dengan server database pusat.")
 
 st.markdown("---")
 
-# Menampilkan Tabel Riwayat Master
+# Menampilkan Tabel Riwayat Master (TETAP ADA & BERSIH TOTAL)
 st.subheader("📋 Seluruh Riwayat Absen & Pendapatan Master")
 if not db_karyawan.empty and len(db_karyawan) > 0:
     df_visual_master = db_karyawan.copy()
@@ -90,23 +105,12 @@ if not db_karyawan.empty and len(db_karyawan) > 0:
         df_visual_master["Pendapatan (Rupiah)"] = df_visual_master["Pendapatan (Rupiah)"].apply(format_rupiah)
     st.dataframe(df_visual_master, use_container_width=True)
     
-    # --- PANEL HAPUS AKTIF KHUSUS DENGAN PIN ---
     st.write("### 🔒 Panel Hapus Absen (Khusus Editor)")
     pin_input = st.text_input("Masukkan PIN Editor untuk Menghapus Data:", type="password", placeholder="Masukkan 4 digit PIN")
     
     if pin_input == "1234":
-        st.success("🔓 PIN Benar. Akses fitur hapus terbuka:")
-        
-        # Dropdown memilih baris yang mau didelete
-        pilihan_hapus = st.selectbox(
-            "Pilih data karyawan yang ingin dihapus:",
-            options=db_karyawan.index,
-            format_func=lambda x: f"Baris {x+2} - {db_karyawan.loc[x, 'Nama Karyawan']} ({db_karyawan.loc[x, 'Waktu Lengkap']})"
-        )
-        
-        if st.button("❌ Konfirmasi Hapus Data ini dari Google Sheets", type="secondary", use_container_width=True):
-            # Trik hapus instan baris lokal & instruksi sinkronisasi sheet
-            st.warning(f"Silakan hapus baris nomor {pilihan_hapus+2} langsung di lembar Google Sheets Anda untuk menghapus data secara permanen.")
+        st.success("🔓 PIN Benar. Akses terbuka.")
+        st.info("💡 **Petunjuk Editor:** Silakan buka file Google Sheets Anda untuk mengedit atau menghapus baris data. Tampilan grafik akan otomatis ikut ter-update!")
     elif pin_input != "":
         st.error("❌ PIN Salah!")
 else:
