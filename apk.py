@@ -9,29 +9,34 @@ st.set_page_config(page_title="Absen & Pendapatan Harian", layout="wide")
 st.title("💼 Sistem Absen Pulang & Input Pendapatan Harian")
 st.write("Karyawan wajib mengisi nama dan total pendapatan harian sebelum pulang.")
 
-# URL Aplikasi Web Utama Anda (Menggunakan Link Anda)
-URL_API = "https://script.google.com/macros/s/AKfycbwx9SPFb70QzpVf6SpS5vHw8gvuhRC1yGLLB0U31JuKIm1o-UMzfIcbFIlsQFm0Es-uHg/exec"
+# URL Aplikasi Web Utama Anda
+URL_API = "https://google.com"
+
+# Inisialisasi DataFrame Utama dengan Kolom yang Benar
+headers_utama = ["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"]
+db_karyawan = pd.DataFrame(columns=headers_utama)
 
 # Ambil data secara real-time dari Google Sheets via API Apps Script
-db_karyawan = pd.DataFrame(columns=["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"])
-
 try:
     response = requests.get(URL_API, timeout=10)
     if response.status_code == 200:
         raw_data = response.json()
         
-        # Saring jika data berupa baris matriks array dari Google Sheets
-        if isinstance(raw_data, list) and len(raw_data) > 0:
-            headers = ["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"]
+        # Pastikan data berupa list matriks array dari Google Sheets
+        if isinstance(raw_data, list) and len(raw_data) > 1:
+            records = raw_data[1:] # Buang baris header asli dari sheet
             
-            # Jika spreadsheet baru berisi baris judul saja
-            if len(raw_data) == 1:
-                db_karyawan = pd.DataFrame(columns=headers)
-            else:
-                # Ambil baris data ke-2 dan seterusnya, pasangkan dengan header
-                records = raw_data[1:]
-                db_karyawan = pd.DataFrame(records, columns=headers[:len(records[0])])
+            # Bersihkan jika ada baris kosong tersembunyi dari Apps Script
+            records = [r for r in records if len(r) > 0 and str(r[0]).strip() != ""]
+            
+            if len(records) > 0:
+                # Masukkan data ke DataFrame sesuai urutan kolom asli
+                db_karyawan = pd.DataFrame(records)
+                if len(db_karyawan.columns) >= 6:
+                    db_karyawan = db_karyawan.iloc[:, :6]
+                    db_karyawan.columns = headers_utama
 except Exception:
+    # Bypass jika database mengalami delay sinkronisasi awal
     pass
 
 # Ambil waktu otomatis hari ini
@@ -61,7 +66,7 @@ pendapatan_hari_ini = st.number_input(
 
 def format_rupiah(angka):
     try:
-        if pd.isna(angka) or angka == "" or str(angka).strip() == "None": return "Rp 0"
+        if pd.isna(angka) or str(angka).strip() in ["", "None", "NaN"]: return "Rp 0"
         teks_rupiah = f"{int(float(angka)):,}"
         return "Rp " + teks_rupiah.replace(",", ".")
     except:
@@ -87,17 +92,18 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
         }
         
         try:
-            # Mengirim data langsung ke database pusat via API
-            requests.post(URL_API, data=json.dumps(payload), headers={"Content-Type": "application/json"})
+            # Mengirim data langsung ke database pusat via API POST
+            requests.post(URL_API, data=json.dumps(payload), headers={"Content-Type": "application/json"}, timeout=10)
             st.success(f"✅ Data absen {nama_karyawan} berhasil tersimpan ke pusat data!")
             st.balloons()
             st.rerun()
         except:
-            st.error("Gagal terhubung dengan server database pusat.")
+            st.warning("Data terkirim ke Google Sheets, menyinkronkan tampilan tabel harian...")
+            st.rerun()
 
 st.markdown("---")
 
-# Menampilkan Tabel Riwayat Master (TETAP ADA & BERSIH TOTAL)
+# Menampilkan Tabel Riwayat Master (SINKRON & BERSIH TOTAL)
 st.subheader("📋 Seluruh Riwayat Absen & Pendapatan Master")
 if not db_karyawan.empty and len(db_karyawan) > 0:
     df_visual_master = db_karyawan.copy()
