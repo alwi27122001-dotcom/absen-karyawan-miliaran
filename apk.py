@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import requests
 
 # Setup tampilan layar HP
 st.set_page_config(page_title="Absen & Pendapatan Harian", layout="wide")
@@ -9,23 +8,24 @@ st.title("💼 Sistem Absen Pulang & Input Pendapatan Harian")
 st.write("Karyawan wajib mengisi nama dan total pendapatan harian sebelum pulang.")
 
 # =========================================================================
-# ⚠️ PUSAT KONFIGURASI DATABASE GOOGLE SHEETS
+# ⚠️ LINK PUSAT DATABASE FORM RESPONSES 1
 # =========================================================================
-# URL CSV dari Google Sheets Anda untuk membaca data grafik dan riwayat
+# Kita tambahkan parameter gid=0 untuk memastikan Python membaca tab Form Responses 1 dengan tepat
 URL_SHEET_CSV = "https://google.com"
-
-# URL Pengiriman Data Google Form Anda
-FORM_URL = "https://google.com"
-
-# ATUR PIN RAHASIA EDITOR UNTUK MENGUNCI PANEL HAPUS
-PIN_EDITOR = "1234"
 # =========================================================================
 
 # Baca data dari Google Sheets secara real-time untuk Grafik & Tabel
 try:
     st.cache_data.clear()
     db_karyawan = pd.read_csv(URL_SHEET_CSV)
+    
+    # Bersihkan kolom hantu Unnamed dan baris kosong
+    db_karyawan = db_karyawan.loc[:, ~db_karyawan.columns.str.contains('^Unnamed')]
     db_karyawan = db_karyawan.dropna(how='all')
+    
+    # Jika Google menyisipkan kolom Timestamp bawaan, sesuaikan pemetaan nama kolom
+    if "waktu lengkap" in db_karyawan.columns:
+        db_karyawan = db_karyawan.rename(columns={"waktu lengkap": "Waktu Lengkap"})
 except Exception:
     db_karyawan = pd.DataFrame(columns=[
         "Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"
@@ -58,6 +58,7 @@ pendapatan_hari_ini = st.number_input(
 
 def format_rupiah(angka):
     try:
+        if pd.isna(angka): return "Rp 0"
         teks_rupiah = f"{int(float(angka)):,}"
         return "Rp " + teks_rupiah.replace(",", ".")
     except:
@@ -65,7 +66,7 @@ def format_rupiah(angka):
 
 st.caption(f"Format Terbaca: **{format_rupiah(pendapatan_hari_ini)}**")
 
-# Tombol Simpan
+# Tombol Simpan (Kirim Terarah Menggunakan Sistem Form)
 if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_width=True):
     if nama_karyawan.strip() == "":
         st.error("❌ Nama karyawan tidak boleh kosong!")
@@ -73,34 +74,34 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
         bulan_inggris = waktu_skrg.strftime("%B")
         nama_bulan_indo = bulan_indo_nama.get(bulan_inggris, "Juni")
         
-        # Kirim data secara baris ke Google Form backend
-        payload = {
-            "waktu_lengkap": waktu_teks,
-            "tahun": tahun_ini,
-            "bulan": nama_bulan_indo,
-            "tanggal": tanggal_hari_ini,
-            "nama_karyawan": nama_karyawan,
-            "pendapatan": float(pendapatan_hari_ini)
-        }
+        # Menggunakan format submit mandiri terarah langsung ke formulir publik
+        FORM_LINK_SEND = (
+            f"https://google.com?"
+            f"entry.1000001={waktu_teks}&"
+            f"entry.1000002={tahun_ini}&"
+            f"entry.1000003={nama_bulan_indo}&"
+            f"entry.1000004={tanggal_hari_ini}&"
+            f"entry.1000005={nama_karyawan}&"
+            f"entry.1000006={float(pendapatan_hari_ini)}"
+        )
         
-        try:
-            # Menggunakan jalur pengiriman data terarah
-            # Catatan: Kita pasang lokal append darurat agar perubahan instan terlihat sebelum disinkronkan total oleh server
-            data_baru = pd.DataFrame([{
-                "Waktu Lengkap": waktu_teks, "Tahun": tahun_ini, "Bulan": nama_bulan_indo,
-                "Tanggal": tanggal_hari_ini, "Nama Karyawan": nama_karyawan, "Pendapatan (Rupiah)": float(pendapatan_hari_ini)
-            }])
-            db_karyawan = pd.concat([db_karyawan, data_baru], ignore_index=True)
-            
-            st.success(f"✅ Data absen {nama_karyawan} berhasil tersimpan ke database!")
-            st.balloons()
-            st.rerun()
-        except:
-            st.error("Gagal mengirim data. Periksa koneksi internet aplikasi.")
+        # Append data lokal agar grafik di HP karyawan langsung ter-update seketika
+        data_baru = pd.DataFrame([{
+            "Waktu Lengkap": waktu_teks, "Tahun": tahun_ini, "Bulan": nama_bulan_indo,
+            "Tanggal": tanggal_hari_ini, "Nama Karyawan": nama_karyawan, "Pendapatan (Rupiah)": float(pendapatan_hari_ini)
+        }])
+        db_karyawan = pd.concat([db_karyawan, data_baru], ignore_index=True)
+        
+        # Tembak form via iframe HTML background
+        st.markdown(f'<iframe src="{FORM_LINK_SEND}" style="display:none;"></iframe>', unsafe_allow_html=True)
+        
+        st.success(f"✅ Data absen {nama_karyawan} berhasil dimasukkan ke dalam sistem!")
+        st.balloons()
+        st.rerun()
 
 st.markdown("---")
 
-# Menampilkan Tabel Riwayat Master (TETAP ADA)
+# Menampilkan Tabel Riwayat Master (SUDAH DISINKRONKAN DENGAN TIMESTAMP FORM)
 st.subheader("📋 Seluruh Riwayat Absen & Pendapatan Master")
 if not db_karyawan.empty and len(db_karyawan) > 0:
     df_visual_master = db_karyawan.copy()
@@ -108,21 +109,20 @@ if not db_karyawan.empty and len(db_karyawan) > 0:
         df_visual_master["Pendapatan (Rupiah)"] = df_visual_master["Pendapatan (Rupiah)"].apply(format_rupiah)
     st.dataframe(df_visual_master, use_container_width=True)
     
-    # --- PANEL HAPUS KHUSUS EDITOR DENGAN PIN ---
     st.write("### 🔒 Panel Hapus Absen (Khusus Editor)")
     pin_input = st.text_input("Masukkan PIN Editor untuk Menghapus Data:", type="password", placeholder="Masukkan 4 digit PIN")
     
-    if pin_input == PIN_EDITOR:
-        st.success("🔓 PIN Benar. Akses aman terbuka.")
-        st.info("💡 **Petunjuk Sinkronisasi Editor:** Karena sistem data sudah terhubung secara global, silakan hapus atau edit baris data karyawan Anda **langsung di dalam file Google Sheets**. Aplikasi di HP/Web akan otomatis menghapus data tersebut dari grafik dan tabel secara instan saat halaman dimuat ulang!")
+    if pin_input == "1234":
+        st.success("🔓 PIN Benar. Akses terbuka.")
+        st.info("💡 **Petunjuk Editor:** Silakan buka file Google Sheets Anda pada tab 'Form Responses 1' untuk menghapus data. Grafik otomatis ter-update seketika!")
     elif pin_input != "":
-        st.error("❌ PIN Salah! Anda tidak memiliki hak akses sebagai editor.")
+        st.error("❌ PIN Salah!")
 else:
-    st.info("Belum ada karyawan yang absen atau spreadsheet masih kosong.")
+    st.info("Belum ada data karyawan yang tersimpan di dalam database.")
 
 st.markdown("---")
 
-# Filter Grafik & Analisis Data Berdasarkan Waktu (TETAP ADA)
+# Filter Grafik & Analisis Data Berdasarkan Waktu
 st.subheader("📊 Filter Grafik & Analisis Data Berdasarkan Waktu")
 list_tahun = ["2024", "2025", "2026", "2027", "2028"]
 if tahun_ini not in list_tahun: list_tahun.append(tahun_ini)
@@ -153,7 +153,7 @@ df_tanggal_aktif = df_bulan_terpilih[df_bulan_terpilih['Tanggal'] == tanggal_ter
 st.markdown("---")
 st.write(f"#### 📊 Hasil Analisis Data untuk Tanggal: **{tanggal_terpilih_teks}**")
 
-if not df_tanggal_aktif.empty and 'Pendapatan (Rupiah)' in df_tanggal_aktif.columns:
+if not df_tanggal_aktif.empty and 'Pendapatan (Rupiah)' in df_tanggal_aktif.columns and len(df_tanggal_aktif) > 0:
     total_hari = pd.to_numeric(df_tanggal_aktif["Pendapatan (Rupiah)"]).sum()
     rata_hari = pd.to_numeric(df_tanggal_aktif["Pendapatan (Rupiah)"]).mean()
     
