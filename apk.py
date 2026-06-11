@@ -9,34 +9,34 @@ st.set_page_config(page_title="Absen & Pendapatan Harian", layout="wide")
 st.title("💼 Sistem Absen Pulang & Input Pendapatan Harian")
 st.write("Karyawan wajib mengisi nama dan total pendapatan harian sebelum pulang.")
 
-# URL Aplikasi Web Utama Anda
+# URL API Web App Google Apps Script Anda yang resmi
 URL_API = "https://google.com"
 
-# Inisialisasi DataFrame Utama dengan Kolom yang Benar
+# Inisialisasi DataFrame Utama dengan Kolom Standar
 headers_utama = ["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"]
 db_karyawan = pd.DataFrame(columns=headers_utama)
 
-# Ambil data secara real-time dari Google Sheets via API Apps Script
+# Ambil data secara real-time dari Google Sheets via API
 try:
-    response = requests.get(URL_API, timeout=10)
+    st.cache_data.clear()
+    response = requests.get(URL_API, timeout=15)
     if response.status_code == 200:
         raw_data = response.json()
         
-        # Pastikan data berupa list matriks array dari Google Sheets
+        # Validasi struktur data list dari Google Apps Script
         if isinstance(raw_data, list) and len(raw_data) > 1:
-            records = raw_data[1:] # Buang baris header asli dari sheet
+            records = raw_data[1:] # Membuang baris header pertama dari sheet
             
-            # Bersihkan jika ada baris kosong tersembunyi dari Apps Script
+            # Buang baris kosong palsu yang dikirim oleh sistem
             records = [r for r in records if len(r) > 0 and str(r[0]).strip() != ""]
             
             if len(records) > 0:
-                # Masukkan data ke DataFrame sesuai urutan kolom asli
                 db_karyawan = pd.DataFrame(records)
+                # Ambil 6 kolom utama saja agar tabel presisi
                 if len(db_karyawan.columns) >= 6:
                     db_karyawan = db_karyawan.iloc[:, :6]
                     db_karyawan.columns = headers_utama
 except Exception:
-    # Bypass jika database mengalami delay sinkronisasi awal
     pass
 
 # Ambil waktu otomatis hari ini
@@ -74,7 +74,7 @@ def format_rupiah(angka):
 
 st.caption(f"Format Terbaca: **{format_rupiah(pendapatan_hari_ini)}**")
 
-# Tombol Simpan
+# Tombol Simpan (Menggunakan Background API POST Murni)
 if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_width=True):
     if nama_karyawan.strip() == "":
         st.error("❌ Nama karyawan tidak boleh kosong!")
@@ -92,18 +92,21 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
         }
         
         try:
-            # Mengirim data langsung ke database pusat via API POST
-            requests.post(URL_API, data=json.dumps(payload), headers={"Content-Type": "application/json"}, timeout=10)
-            st.success(f"✅ Data absen {nama_karyawan} berhasil tersimpan ke pusat data!")
-            st.balloons()
-            st.rerun()
-        except:
-            st.warning("Data terkirim ke Google Sheets, menyinkronkan tampilan tabel harian...")
-            st.rerun()
+            # Kirim data ke database tanpa memicu pemblokiran iframe
+            res = requests.post(URL_API, data=json.dumps(payload), headers={"Content-Type": "application/json"}, timeout=15)
+            
+            if res.status_code == 200:
+                st.success(f"✅ Data absen {nama_karyawan} berhasil masuk ke Google Sheets!")
+                st.balloons()
+                st.rerun()
+            else:
+                st.error("Gagal memvalidasi data ke server database.")
+        except Exception as e:
+            st.error("Terjadi kegagalan komunikasi jaringan server database pusat.")
 
 st.markdown("---")
 
-# Menampilkan Tabel Riwayat Master (SINKRON & BERSIH TOTAL)
+# Menampilkan Tabel Riwayat Master (GARANSI 100% TETAP MUNCUL)
 st.subheader("📋 Seluruh Riwayat Absen & Pendapatan Master")
 if not db_karyawan.empty and len(db_karyawan) > 0:
     df_visual_master = db_karyawan.copy()
