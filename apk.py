@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import requests
+import json
 
 # Setup tampilan layar HP
 st.set_page_config(page_title="Absen & Pendapatan Harian", layout="wide")
@@ -8,24 +10,27 @@ st.title("💼 Sistem Absen Pulang & Input Pendapatan Harian")
 st.write("Karyawan wajib mengisi nama dan total pendapatan harian sebelum pulang.")
 
 # =========================================================================
-# ⚠️ LINK PUSAT DATABASE FORM RESPONSES 1
+# ⚠️ URL UTAMA DATABASE APPS SCRIPT (SUDAH TERHUBUNG ID PENERAPANMU)
 # =========================================================================
-# Kita tambahkan parameter gid=0 untuk memastikan Python membaca tab Form Responses 1 dengan tepat
-URL_SHEET_CSV = "https://google.com"
+URL_API = "https://google.com"
 # =========================================================================
 
-# Baca data dari Google Sheets secara real-time untuk Grafik & Tabel
+# Ambil data secara real-time dari Google Sheets via API Apps Script
 try:
-    st.cache_data.clear()
-    db_karyawan = pd.read_csv(URL_SHEET_CSV)
+    response = requests.get(URL_API)
+    raw_data = response.json()
     
-    # Bersihkan kolom hantu Unnamed dan baris kosong
-    db_karyawan = db_karyawan.loc[:, ~db_karyawan.columns.str.contains('^Unnamed')]
-    db_karyawan = db_karyawan.dropna(how='all')
-    
-    # Jika Google menyisipkan kolom Timestamp bawaan, sesuaikan pemetaan nama kolom
-    if "waktu lengkap" in db_karyawan.columns:
-        db_karyawan = db_karyawan.rename(columns={"waktu lengkap": "Waktu Lengkap"})
+    # Ambil baris pertama sebagai nama kolom, sisanya sebagai data
+    if len(raw_data) > 0:
+        headers = raw_data[0]
+        records = raw_data[1:]
+        db_karyawan = pd.DataFrame(records, columns=headers)
+        
+        # Hapus kolom Timestamp bawaan form jika mengganggu estetika tabel
+        if "Timestamp" in db_karyawan.columns:
+            db_karyawan = db_karyawan.drop(columns=["Timestamp"])
+    else:
+        db_karyawan = pd.DataFrame(columns=["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"])
 except Exception:
     db_karyawan = pd.DataFrame(columns=[
         "Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"
@@ -58,15 +63,15 @@ pendapatan_hari_ini = st.number_input(
 
 def format_rupiah(angka):
     try:
-        if pd.isna(angka): return "Rp 0"
+        if pd.isna(angka) or angka == "": return "Rp 0"
         teks_rupiah = f"{int(float(angka)):,}"
         return "Rp " + teks_rupiah.replace(",", ".")
     except:
-        return "Rp 0"
+        return "Rp " + str(angka)
 
 st.caption(f"Format Terbaca: **{format_rupiah(pendapatan_hari_ini)}**")
 
-# Tombol Simpan (Kirim Terarah Menggunakan Sistem Form)
+# Tombol Simpan
 if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_width=True):
     if nama_karyawan.strip() == "":
         st.error("❌ Nama karyawan tidak boleh kosong!")
@@ -74,34 +79,28 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
         bulan_inggris = waktu_skrg.strftime("%B")
         nama_bulan_indo = bulan_indo_nama.get(bulan_inggris, "Juni")
         
-        # Menggunakan format submit mandiri terarah langsung ke formulir publik
-        FORM_LINK_SEND = (
-            f"https://google.com?"
-            f"entry.1000001={waktu_teks}&"
-            f"entry.1000002={tahun_ini}&"
-            f"entry.1000003={nama_bulan_indo}&"
-            f"entry.1000004={tanggal_hari_ini}&"
-            f"entry.1000005={nama_karyawan}&"
-            f"entry.1000006={float(pendapatan_hari_ini)}"
-        )
+        # Payload data untuk dikirim ke Google Sheets
+        payload = {
+            "waktu": waktu_teks,
+            "tahun": tahun_ini,
+            "bulan": nama_bulan_indo,
+            "tanggal": tanggal_hari_ini,
+            "nama": nama_karyawan,
+            "pendapatan": float(pendapatan_hari_ini)
+        }
         
-        # Append data lokal agar grafik di HP karyawan langsung ter-update seketika
-        data_baru = pd.DataFrame([{
-            "Waktu Lengkap": waktu_teks, "Tahun": tahun_ini, "Bulan": nama_bulan_indo,
-            "Tanggal": tanggal_hari_ini, "Nama Karyawan": nama_karyawan, "Pendapatan (Rupiah)": float(pendapatan_hari_ini)
-        }])
-        db_karyawan = pd.concat([db_karyawan, data_baru], ignore_index=True)
-        
-        # Tembak form via iframe HTML background
-        st.markdown(f'<iframe src="{FORM_LINK_SEND}" style="display:none;"></iframe>', unsafe_allow_html=True)
-        
-        st.success(f"✅ Data absen {nama_karyawan} berhasil dimasukkan ke dalam sistem!")
-        st.balloons()
-        st.rerun()
+        try:
+            # Mengirim data langsung ke database pusat via API
+            requests.post(URL_API, data=json.dumps(payload))
+            st.success(f"✅ Data absen {nama_karyawan} berhasil masuk ke Google Sheets pusat!")
+            st.balloons()
+            st.rerun()
+        except:
+            st.error("Gagal terhubung dengan server database.")
 
 st.markdown("---")
 
-# Menampilkan Tabel Riwayat Master (SUDAH DISINKRONKAN DENGAN TIMESTAMP FORM)
+# Menampilkan Tabel Riwayat Master (TETAP ADA & BERSIH TOTAL)
 st.subheader("📋 Seluruh Riwayat Absen & Pendapatan Master")
 if not db_karyawan.empty and len(db_karyawan) > 0:
     df_visual_master = db_karyawan.copy()
@@ -114,7 +113,7 @@ if not db_karyawan.empty and len(db_karyawan) > 0:
     
     if pin_input == "1234":
         st.success("🔓 PIN Benar. Akses terbuka.")
-        st.info("💡 **Petunjuk Editor:** Silakan buka file Google Sheets Anda pada tab 'Form Responses 1' untuk menghapus data. Grafik otomatis ter-update seketika!")
+        st.info("💡 **Petunjuk Editor:** Silakan buka file Google Sheets Anda pada tab 'Form Responses 1' untuk mengedit atau menghapus baris data. Aplikasi web/HP otomatis sinkron mendeteksi perubahan tersebut secara instan!")
     elif pin_input != "":
         st.error("❌ PIN Salah!")
 else:
@@ -154,8 +153,8 @@ st.markdown("---")
 st.write(f"#### 📊 Hasil Analisis Data untuk Tanggal: **{tanggal_terpilih_teks}**")
 
 if not df_tanggal_aktif.empty and 'Pendapatan (Rupiah)' in df_tanggal_aktif.columns and len(df_tanggal_aktif) > 0:
-    total_hari = pd.to_numeric(df_tanggal_aktif["Pendapatan (Rupiah)"]).sum()
-    rata_hari = pd.to_numeric(df_tanggal_aktif["Pendapatan (Rupiah)"]).mean()
+    total_hari = pd.to_numeric(df_tanggal_aktif["Pendapatan (Rupiah)"], errors='coerce').sum()
+    rata_hari = pd.to_numeric(df_tanggal_aktif["Pendapatan (Rupiah)"], errors='coerce').mean()
     
     col_box1, col_box2 = st.columns(2)
     with col_box1: st.metric(label=f"Total Pendapatan", value=format_rupiah(total_hari))
@@ -163,7 +162,7 @@ if not df_tanggal_aktif.empty and 'Pendapatan (Rupiah)' in df_tanggal_aktif.colu
         
     st.write(f"### 📈 Grafik Tren Pendapatan Tanggal {tanggal_terpilih_teks}")
     df_grafik_garis = df_tanggal_aktif[['Nama Karyawan', 'Pendapatan (Rupiah)']].copy()
-    df_grafik_garis['Pendapatan (Rupiah)'] = pd.to_numeric(df_grafik_garis['Pendapatan (Rupiah)'])
+    df_grafik_garis['Pendapatan (Rupiah)'] = pd.to_numeric(df_grafik_garis['Pendapatan (Rupiah)'], errors='coerce')
     df_grafik_garis = df_grafik_garis.set_index('Nama Karyawan')
     st.line_chart(df_grafik_garis)
 else:
