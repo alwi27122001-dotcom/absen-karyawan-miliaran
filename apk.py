@@ -10,31 +10,36 @@ st.title("💼 Sistem Absen Pulang & Input Pendapatan Harian")
 st.write("Karyawan wajib mengisi nama dan total pendapatan harian sebelum pulang.")
 
 # =========================================================================
-# ⚠️ URL UTAMA DATABASE APPS SCRIPT (SUDAH TERHUBUNG ID PENERAPANMU)
+# ⚠️ URL UTAMA DATABASE APPS SCRIPT (ID PENERAPAN ANDA)
 # =========================================================================
 URL_API = "https://google.com"
 # =========================================================================
 
 # Ambil data secara real-time dari Google Sheets via API Apps Script
+db_karyawan = pd.DataFrame(columns=["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"])
+
 try:
-    response = requests.get(URL_API)
-    raw_data = response.json()
-    
-    # Ambil baris pertama sebagai nama kolom, sisanya sebagai data
-    if len(raw_data) > 0:
-        headers = raw_data[0]
-        records = raw_data[1:]
-        db_karyawan = pd.DataFrame(records, columns=headers)
+    response = requests.get(URL_API, timeout=10)
+    if response.status_code == 200:
+        raw_data = response.json()
         
-        # Hapus kolom Timestamp bawaan form jika mengganggu estetika tabel
-        if "Timestamp" in db_karyawan.columns:
-            db_karyawan = db_karyawan.drop(columns=["Timestamp"])
-    else:
-        db_karyawan = pd.DataFrame(columns=["Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"])
-except Exception:
-    db_karyawan = pd.DataFrame(columns=[
-        "Waktu Lengkap", "Tahun", "Bulan", "Tanggal", "Nama Karyawan", "Pendapatan (Rupiah)"
-    ])
+        # Saring jika sheet baru berisi judul kolom saja (panjang baris <= 1)
+        if isinstance(raw_data, list) and len(raw_data) > 1:
+            headers = raw_data[0]
+            records = raw_data[1:]
+            
+            # Jika Google Apps Script mengembalikan baris kosong atau timestamp
+            db_karyawan = pd.DataFrame(records, columns=headers)
+            
+            # Bersihkan kolom hantu atau nama kolom berhuruf kecil bawaan sistem
+            db_karyawan = db_karyawan.loc[:, ~db_karyawan.columns.str.contains('^Unnamed|^Timestamp')]
+            db_karyawan = db_karyawan.rename(columns={
+                "waktu lengkap": "Waktu Lengkap", "tahun": "Tahun", "bulan": "Bulan", 
+                "tanggal": "Tanggal", "nama karyawan": "Nama Karyawan", "pendapatan (rupiah)": "Pendapatan (Rupiah)"
+            })
+except Exception as e:
+    # Bypass silent jika database pusat masih kosong, agar tombol input tidak terkunci
+    pass
 
 # Ambil waktu otomatis hari ini
 waktu_skrg = datetime.now()
@@ -63,7 +68,7 @@ pendapatan_hari_ini = st.number_input(
 
 def format_rupiah(angka):
     try:
-        if pd.isna(angka) or angka == "": return "Rp 0"
+        if pd.isna(angka) or angka == "" or angka == "None": return "Rp 0"
         teks_rupiah = f"{int(float(angka)):,}"
         return "Rp " + teks_rupiah.replace(",", ".")
     except:
@@ -79,7 +84,7 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
         bulan_inggris = waktu_skrg.strftime("%B")
         nama_bulan_indo = bulan_indo_nama.get(bulan_inggris, "Juni")
         
-        # Payload data untuk dikirim ke Google Sheets
+        # Payload data rapi dikirim sebagai string JSON terarah
         payload = {
             "waktu": waktu_teks,
             "tahun": tahun_ini,
@@ -90,13 +95,13 @@ if st.button("📥 Simpan Absen & Pendapatan", type="primary", use_container_wid
         }
         
         try:
-            # Mengirim data langsung ke database pusat via API
-            requests.post(URL_API, data=json.dumps(payload))
+            # Mengirim data langsung ke database pusat via API POST
+            res = requests.post(URL_API, data=json.dumps(payload), headers={"Content-Type": "application/json"})
             st.success(f"✅ Data absen {nama_karyawan} berhasil masuk ke Google Sheets pusat!")
             st.balloons()
             st.rerun()
-        except:
-            st.error("Gagal terhubung dengan server database.")
+        except Exception as err:
+            st.error(f"Gagal mengirim data ke server. Error: {str(err)}")
 
 st.markdown("---")
 
@@ -113,11 +118,11 @@ if not db_karyawan.empty and len(db_karyawan) > 0:
     
     if pin_input == "1234":
         st.success("🔓 PIN Benar. Akses terbuka.")
-        st.info("💡 **Petunjuk Editor:** Silakan buka file Google Sheets Anda pada tab 'Form Responses 1' untuk mengedit atau menghapus baris data. Aplikasi web/HP otomatis sinkron mendeteksi perubahan tersebut secara instan!")
+        st.info("💡 **Petunjuk Editor:** Silakan buka file Google Sheets Anda untuk mengedit atau menghapus baris data. Aplikasi web/HP otomatis sinkron mendeteksi perubahan tersebut secara instan!")
     elif pin_input != "":
         st.error("❌ PIN Salah!")
 else:
-    st.info("Belum ada data karyawan yang tersimpan di dalam database.")
+    st.info("Belum ada data karyawan yang tersimpan di dalam database pusat.")
 
 st.markdown("---")
 
